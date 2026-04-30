@@ -1,5 +1,60 @@
 import re
+import joblib
+import numpy as np
+import os
 from urllib.parse import urlparse
+
+# Load ML model if available
+MODEL_PATH = os.path.join(os.path.dirname(__file__), "phishguard_model.pkl")
+try:
+    ml_model = joblib.load(MODEL_PATH)
+    ML_AVAILABLE = True
+except:
+    ml_model = None
+    ML_AVAILABLE = False
+
+
+def extract_features(url):
+    """Extract numerical features from a URL for ML classification."""
+    try:
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        path = parsed.path
+        full_url = url.lower()
+
+        features = {
+            "url_length": len(url),
+            "domain_length": len(domain),
+            "num_dots": url.count("."),
+            "num_hyphens": url.count("-"),
+            "num_slashes": url.count("/"),
+            "num_at": url.count("@"),
+            "num_question": url.count("?"),
+            "num_equals": url.count("="),
+            "num_underscores": url.count("_"),
+            "num_percent": url.count("%"),
+            "num_ampersand": url.count("&"),
+            "is_http": 1 if url.startswith("http://") else 0,
+            "has_ip": 1 if re.match(r"^\d{1,3}(\.\d{1,3}){3}$", domain) else 0,
+            "has_suspicious_keyword": 1 if any(k in full_url for k in [
+                "login", "verify", "secure", "account", "update",
+                "banking", "confirm", "password", "signin", "wallet"
+            ]) else 0,
+            "has_shortener": 1 if any(s in full_url for s in [
+                "bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly"
+            ]) else 0,
+            "num_subdomains": domain.count("."),
+            "path_length": len(path),
+            "has_special_chars": 1 if re.search(r"[^a-zA-Z0-9.\-/:]", domain) else 0,
+            "has_brand_in_path": 1 if any(b in path.lower() for b in [
+                "paypal", "google", "facebook", "amazon", "apple",
+                "microsoft", "netflix", "instagram", "twitter"
+            ]) else 0,
+        }
+        return list(features.values())
+    except:
+        return [0] * 19
+
 
 def analyse_url(url):
     findings = []
@@ -8,6 +63,22 @@ def analyse_url(url):
     parsed = urlparse(url)
     domain = parsed.netloc
     full_url = url.lower()
+
+    # Layer 0: ML Model prediction
+    if ML_AVAILABLE:
+        try:
+            features = extract_features(url)
+            prediction = ml_model.predict([features])[0]
+            probability = ml_model.predict_proba([features])[0][1]
+
+            if prediction == 1 and probability >= 0.8:
+                findings.append(f"ML model flagged this URL as phishing (confidence: {probability*100:.1f}%).")
+                score += 40
+            elif prediction == 1 and probability >= 0.5:
+                findings.append(f"ML model considers this URL suspicious (confidence: {probability*100:.1f}%).")
+                score += 20
+        except:
+            pass
 
     # Check 0: Insecure HTTP
     if url.startswith("http://"):
