@@ -10,6 +10,20 @@ scanner_bp = Blueprint("scanner", __name__)
 
 GOOGLE_KEY = os.getenv("GOOGLE_API_KEY")
 VIRUSTOTAL_KEY = os.getenv("VIRUSTOTAL_API_KEY")
+def expand_url(url):
+    """Expand shortened URLs to reveal the real destination."""
+    shorteners = ["bit.ly", "tinyurl.com", "t.co", "goo.gl", "ow.ly",
+                  "is.gd", "buff.ly", "adf.ly", "shorturl.at", "tiny.cc"]
+    try:
+        domain = url.split("/")[2] if "/" in url else ""
+        if any(s in domain for s in shorteners):
+            response = requests.head(url, allow_redirects=True, timeout=5)
+            expanded = response.url
+            if expanded != url:
+                return expanded, f"Shortened URL expanded to: {expanded}"
+    except Exception:
+        pass
+    return url, None
 
 
 def check_google_safe_browsing(url):
@@ -80,6 +94,12 @@ def scan():
 
     if not url.startswith("http"):
         url = "http://" + url
+        # Expand shortened URLs
+    expanded_url, expand_message = expand_url(url)
+    if expanded_url != url:
+        url = expanded_url
+        findings.append(expand_message)
+        score += 10
 
     findings = []
     score = 0
